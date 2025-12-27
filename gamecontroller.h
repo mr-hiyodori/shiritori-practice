@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QVariantList>
 #include "shiritorigame.h"
+#include <QList>
 
 class GameController : public QObject
 {
@@ -15,7 +16,7 @@ class GameController : public QObject
     Q_PROPERTY(int playerHearts READ playerHearts NOTIFY playerHeartsChanged)
     Q_PROPERTY(int playerPoints READ playerPoints NOTIFY playerPointsChanged)
     Q_PROPERTY(QString currentPrefix READ currentPrefix NOTIFY currentPrefixChanged)
-    Q_PROPERTY(QStringList topSolves READ topSolves NOTIFY topSolvesChanged)
+    Q_PROPERTY(QVariantList topSolves READ topSolves NOTIFY topSolvesChanged)
     Q_PROPERTY(QStringList playerWords READ playerWords NOTIFY playerWordsChanged)
     Q_PROPERTY(QStringList aiWords READ aiWords NOTIFY aiWordsChanged)
     Q_PROPERTY(QString gameStatus READ gameStatus NOTIFY gameStatusChanged)
@@ -29,7 +30,7 @@ public:
     int playerHearts() const { return m_game ? m_game->getPlayerHearts() : 2; }
     int playerPoints() const { return m_game ? m_game->getPlayerPoints() : 0; }
     QString currentPrefix() const { return m_currentPrefix; }
-    QStringList topSolves() const { return m_topSolves; }
+    QVariantList topSolves() const { return m_topSolves; }
     QStringList playerWords() const { return m_playerWords; }
     QStringList aiWords() const { return m_aiWords; }
     QString gameStatus() const { return m_gameStatus; }
@@ -41,6 +42,10 @@ public:
     Q_INVOKABLE bool submitWord(const QString& word);
     Q_INVOKABLE void resetGame();
     Q_INVOKABLE void endGame();
+    Q_INVOKABLE void onHeartLoss();
+    Q_INVOKABLE QStringList getFullWordChain();
+    Q_INVOKABLE int topSolvesHistorySize() const;
+    Q_INVOKABLE QVariantList topSolvesForIndex(int idx) const;
     
     // Note: getAIMove() is NOT needed here - it's called internally by processAITurn()
 
@@ -61,7 +66,8 @@ signals:
 private:
     ShiritoriGame* m_game;
     QString m_currentPrefix;
-    QStringList m_topSolves;
+    QVariantList m_topSolves;
+    QList<QVariantList> m_topSolvesHistory;
     QStringList m_playerWords;
     QStringList m_aiWords;
     QString m_gameStatus;
