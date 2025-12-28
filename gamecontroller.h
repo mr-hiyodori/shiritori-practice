@@ -7,6 +7,7 @@
 #include <QVariantList>
 #include "shiritorigame.h"
 #include <QList>
+#include <vector>
 
 class GameController : public QObject
 {
@@ -46,8 +47,7 @@ public:
     Q_INVOKABLE QStringList getFullWordChain();
     Q_INVOKABLE int topSolvesHistorySize() const;
     Q_INVOKABLE QVariantList topSolvesForIndex(int idx) const;
-    
-    // Note: getAIMove() is NOT needed here - it's called internally by processAITurn()
+    Q_INVOKABLE QString playerWordAtIndex(int index) const;
 
 signals:
     // Signals to notify QML of changes
@@ -68,6 +68,7 @@ private:
     QString m_currentPrefix;
     QVariantList m_topSolves;
     QList<QVariantList> m_topSolvesHistory;
+    std::vector<std::string> m_playerWordHistory;
     QStringList m_playerWords;
     QStringList m_aiWords;
     QString m_gameStatus;

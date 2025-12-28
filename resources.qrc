@@ -4,7 +4,12 @@
         <file>Assets/player_avatar.jpg</file>
         <file>Assets/AI_avatar.png</file>
         <file>Assets/heart.png</file>
+        <file>Assets/upload.png</file>
         <file>Assets/word_chain.png</file>
         <file>Assets/word_choice.png</file>
+        <file>Assets/type_sound.wav</file>
+        <file>Assets/ran_out_of_time.wav</file>
+        <file>Assets/submit.wav</file>
+        <file>Assets/top_sound.wav</file>
     </qresource>
 </RCC>

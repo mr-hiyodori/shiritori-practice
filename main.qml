@@ -3,6 +3,7 @@ import QtQuick.Controls 2.12
 import QtQuick.Layouts 1.12
 import QtQuick.Window 2.12
 import Qt.labs.platform 1.1
+import QtMultimedia 5.12
 
 ApplicationWindow {
     id: mainWindow
@@ -16,7 +17,6 @@ ApplicationWindow {
     font.family: "Comic Neue"
 
     property string currentScreen: "mainMenu"
-    // added screen for upload flow
     property bool showTopSolveNotification: false
     property bool showHeartAnimation: false
     property bool showHeartLossAnimation: false
@@ -29,6 +29,34 @@ ApplicationWindow {
     property bool showWordChainDialog: false
     property bool showWordChoicesDialog: false
     property string chosenDictPath: ""
+    property var wordChainModel: []
+    property var wordChoicesSnapshots: []  // Change from var to specific type
+    property bool showAlreadyUsedAnimation: false
+
+    // Sound Effects
+    SoundEffect {
+        id: typeSound
+        source: "qrc:///Assets/type_sound.wav"
+        volume: 0.25
+    }
+    
+    SoundEffect {
+        id: timeoutSound
+        source: "qrc:///Assets/ran_out_of_time.wav"
+        volume: 0.8
+    }
+
+    SoundEffect {
+        id: submitSound
+        source: "qrc:///Assets/submit.wav"
+        volume: 0.5
+    }
+
+    SoundEffect {
+        id: topSolveSound
+        source: "qrc:///Assets/top_sound.wav"
+        volume: 0.9
+    }
     
     // Calculate max time based on difficulty
     function getMaxTimeForDifficulty(diff) {
@@ -49,78 +77,310 @@ ApplicationWindow {
     Rectangle {
         id: wordChainDialog
         visible: showWordChainDialog
-        color: "#2b2c30"
+        color: "transparent"
         radius: 12
-        width: mainWindow.width * 0.7
-        height: mainWindow.height * 0.7
+        width: mainWindow.width * 0.92
+        height: mainWindow.height * 0.92
         anchors.centerIn: parent
-        border.color: "#555"
-        border.width: 2
+        border.width: 0
         z: 2000
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 16
+            anchors.margins: 8
             spacing: 8
+
+            // Title floating above the panel
+            Text {
+                text: "Word Chain"
+                font.pixelSize: 54
+                color: "white"
+                Layout.alignment: Qt.AlignLeft
+                font.family: "Comic Neue"
+            }
 
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button { text: "Close"; onClicked: showWordChainDialog = false }
-            }
+                Rectangle {
+                    id: wcCloseBtn
+                    width: 40
+                    height: 40
+                    radius: 20
+                    color: "#e8e8e8"
+                    border.color: "#00000033"
+                    border.width: 1
+                    Layout.alignment: Qt.AlignVCenter
 
-            RowLayout {
-                spacing: 12
-                Image { source: "qrc:///Assets/word_chain.png"; width: 64; height: 64 }
-                Text { text: "Word Chain"; font.pixelSize: 28; color: "white" }
-            }
-
-            ListView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                model: gameController.getFullWordChain()
-                delegate: Text { text: index+1 + ". " + modelData; color: "#dcdcdc"; font.pixelSize: 18 }
-            }
-        }
-    }
-
-    // Word Choices dialog (top solves history)
-    Rectangle {
-        id: wordChoicesDialog
-        visible: showWordChoicesDialog
-        color: "#2b2c30"
-        radius: 12
-        width: mainWindow.width * 0.75
-        height: mainWindow.height * 0.75
-        anchors.centerIn: parent
-        border.color: "#555"
-        border.width: 2
-        z: 2000
-
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 16
-            spacing: 8
-
-            RowLayout { Layout.alignment: Qt.AlignRight; Button { text: "Close"; onClicked: showWordChoicesDialog = false } }
-            RowLayout { spacing: 12; Image { source: "qrc:///Assets/word_choice.png"; width: 64; height: 64 } Text { text: "Word Choices (Top Solves History)"; font.pixelSize: 24; color: "white" } }
-
-            // Outer List of turns
-            ListView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                model: gameController.topSolvesHistorySize()
-                delegate: Column {
-                    width: parent.width
-                    Text { text: "Turn " + (index+1); color: "#ffd166" }
-                    Repeater {
-                        model: gameController.topSolvesForIndex(index)
-                        delegate: Row { spacing: 8; Text { text: (idx+1) + ")"; color: "#f5c542" } Text { text: modelData.word ? modelData.word + " (" + modelData.createsPrefixSolutions + ")" : modelData; color: "#dcdcdc" } }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "✕"
+                        color: "#222"
+                        font.pixelSize: 18
                     }
-                    Rectangle { height: 1; color: "#444"; width: parent.width }
+
+                    MouseArea { anchors.fill: parent; onClicked: showWordChainDialog = false }
+                }
+            }
+
+            // Background panel that holds the chain grid
+            Rectangle {
+                id: wcPanel
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: "#4a4d57"
+                radius: 16
+
+                Flickable {
+                    anchors.fill: parent
+                    anchors.margins: 40
+                    contentHeight: gridContainer.height
+                    clip: true
+                    
+                    Grid {
+                        id: gridContainer
+                        width: parent.width
+                        columns: 8
+                        rowSpacing: 15
+                        columnSpacing: (width - (columns * 115)) / (columns + 1)
+                        leftPadding: (width - (columns * 115)) / (columns + 1)
+                        
+                        Repeater {
+                            model: wordChainModel
+                            
+                            delegate: Item {
+                                width: 115
+                                height: 45
+                                
+                                property int itemIndex: index
+                                
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 8
+                                    // Index 0, 2, 4... = Player (blue), Index 1, 3, 5... = AI (red)
+                                    color: (parent.itemIndex % 2 === 0) ? "#8fb7df" : "#d24a4a"
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: modelData
+                                        color: "white"
+                                        font.pixelSize: 15
+                                        font.bold: true
+                                        font.family: "Comic Neue"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        elide: Text.ElideRight
+                                        width: parent.width - 12
+                                    }
+                                }
+                                
+                                // Arrow overlay positioned to the right of this item
+                                Text {
+                                    anchors.left: parent.right
+                                    anchors.leftMargin: (gridContainer.columnSpacing / 2) - 12
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "→"
+                                    color: "white"
+                                    font.pixelSize: 24
+                                    font.bold: true
+                                    visible: (parent.itemIndex + 1) % gridContainer.columns !== 0 && parent.itemIndex < wordChainModel.length - 1
+                                    z: 100
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+
+    // When the dialog opens, snapshot the current full word chain
+    onShowWordChainDialogChanged: {
+        if (showWordChainDialog) {
+            wordChainModel = gameController.getFullWordChain()
+        }
+    }
+
+// Word Choices dialog (top solves history)
+Rectangle {
+    id: wordChoicesDialog
+    visible: showWordChoicesDialog
+    color: "transparent"
+    radius: 12
+    width: mainWindow.width * 0.85
+    height: mainWindow.height * 0.85
+    anchors.centerIn: parent
+    border.width: 0
+    z: 2000
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 8
+        spacing: 8
+
+        // Title
+        Text {
+            text: "Word Choices"
+            font.pixelSize: 54
+            color: "white"
+            Layout.alignment: Qt.AlignLeft
+            font.family: "Comic Neue"
+        }
+
+        RowLayout {
+            Layout.alignment: Qt.AlignRight
+            Rectangle {
+                id: wcChoicesCloseBtn
+                width: 40
+                height: 40
+                radius: 20
+                color: "#e8e8e8"
+                border.color: "#00000033"
+                border.width: 1
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "✕"
+                    color: "#222"
+                    font.pixelSize: 18
+                }
+
+                MouseArea { anchors.fill: parent; onClicked: showWordChoicesDialog = false }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            color: "#4a4d57"
+            radius: 16
+
+            // Show message if no data
+            Text {
+                visible: wordChoicesSnapshots.length === 0
+                anchors.centerIn: parent
+                text: "No word choices recorded yet.\nPlay some rounds first!"
+                font.pixelSize: 24
+                color: "#a0a0a0"
+                horizontalAlignment: Text.AlignHCenter
+                font.family: "Comic Neue"
+            }
+
+            Flickable {
+                anchors.fill: parent
+                anchors.margins: 40
+                contentHeight: choicesColumn.height
+                clip: true
+
+                Column {
+                    id: choicesColumn
+                    width: parent.width
+                    spacing: 20
+                    
+                    Repeater {
+                        id: historyRepeater
+                        model: wordChoicesSnapshots
+                        
+                        delegate: Column {
+                            width: choicesColumn.width
+                            spacing: 10
+                            
+                            // Show player word label
+                            Text {
+                                text: "Your word: " + (modelData.playerWord || "?")
+                                font.pixelSize: 18
+                                color: "#64c878"
+                                font.bold: true
+                                font.family: "Comic Neue"
+                            }
+                            
+                            // Grid of top solves
+                            Grid {
+                                width: parent.width
+                                columns: 3
+                                columnSpacing: 20
+                                rowSpacing: 20
+                                
+                                Repeater {
+                                    model: modelData.topSolves || []
+                                    
+                                    delegate: Rectangle {
+                                        width: (choicesColumn.width - 40) / 3
+                                        height: 80
+                                        radius: 12
+                                        
+                                        property bool isTopSolve: modelData.createsPrefixSolutions <= 5
+                                        property bool isPlayerWord: parent.parent.parent.modelData.playerWord === modelData.word
+                                        
+                                        color: isTopSolve ? "#111217" : "#55565a"
+                                        border.width: isPlayerWord ? 3 : 0
+                                        border.color: isPlayerWord ? "#64c878" : "transparent"
+                                        
+                                        ColumnLayout {
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            
+                                            Text {
+                                                text: modelData.word || "-"
+                                                color: parent.parent.isTopSolve ? "#ffd166" : "#d3d3d3"
+                                                font.pixelSize: 20
+                                                font.bold: true
+                                                Layout.alignment: Qt.AlignHCenter
+                                                font.family: "Comic Neue"
+                                            }
+                                            
+                                            Text {
+                                                text: "(" + (modelData.createsPrefixSolutions || 0) + " solutions)"
+                                                color: parent.parent.isTopSolve ? "#ffd166" : "#a0a0a0"
+                                                font.pixelSize: 14
+                                                Layout.alignment: Qt.AlignHCenter
+                                                font.family: "Comic Neue"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Separator line
+                            Rectangle {
+                                width: parent.width
+                                height: 2
+                                color: "#3a3d47"
+                                opacity: 0.5
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// When the Word Choices dialog opens, snapshot the history from the controller
+onShowWordChoicesDialogChanged: {
+    if (showWordChoicesDialog) {
+        console.log("=== WORD CHOICES DEBUG ===")
+        var n = gameController.topSolvesHistorySize()
+        console.log("History size:", n)
+        
+        // Clear and rebuild the array
+        wordChoicesSnapshots = []
+        
+        for (var i = 0; i < n; ++i) {
+            var playerWord = gameController.playerWordAtIndex(i)
+            var topSolvesForTurn = gameController.topSolvesForIndex(i)
+            
+            console.log("Turn", i, "- Player word:", playerWord, "Top solves count:", topSolvesForTurn.length)
+            
+            wordChoicesSnapshots.push({
+                playerWord: playerWord,
+                topSolves: topSolvesForTurn
+            })
+        }
+        
+        console.log("Total snapshots created:", wordChoicesSnapshots.length)
+        console.log("=========================")
+    }
+}
 
     // Connect to C++ signals
     Connections {
@@ -154,6 +414,12 @@ ApplicationWindow {
         function onWordInvalid(reason) {
             showInvalidWordAnimation = true
             invalidWordTimer.start()
+
+          // Show "already used" floating text if that's the reason
+          if (reason === "Word already used!") {
+            showAlreadyUsedAnimation = true
+            alreadyUsedTimer.start()
+          }
             // Don't stop timer - it keeps running
             userInput.text = ""
         }
@@ -201,12 +467,16 @@ ApplicationWindow {
         repeat: true
         running: timerRunning
         onTriggered: {
-            timeRemaining -= 0.1
-            if (timeRemaining <= 0) {
-                timerRunning = false
-                showHeartLossAnimation = true
-                heartLossTimer.start()
-                userInput.text = ""
+          timeRemaining -= 0.1
+          if (timeRemaining <= 0) {
+            timerRunning = false
+
+            // Play timeout sound
+            timeoutSound.play()
+
+            showHeartLossAnimation = true
+            heartLossTimer.start()
+            userInput.text = ""
 
                 // Inform backend of heart loss; backend will decrement and reset points
                 gameController.onHeartLoss()
@@ -229,47 +499,54 @@ ApplicationWindow {
         }
     }
 
-// Top solves display (window-level overlay, only visible during gameplay)
-Rectangle {
-    id: topSolvesOverlay
-    x: mainWindow.width / 2 - 300
-    y: 170
-    width: 600
-    height: 35
-    color: "transparent"
-    radius: 8
-    border.color: "transparent"
-    border.width: 1
-    // Show ONLY if player has submitted at least one word AND there are top solves
-    // This ensures top solves appear AFTER word submission, not before
-    visible: currentScreen === "gameplay" && 
-             gameController.topSolves.length > 0 && 
-             gameController.playerWords.length > 0
-    z: 1000
-
-    Text {
-        id: topSolvesOverlayText
-        anchors.centerIn: parent
-        text: {
-            if (gameController.topSolves.length === 0) return ""
-            var solves = ""
-            for (var i = 0; i < Math.min(4, gameController.topSolves.length); i++) {
-                if (i > 0) solves += ", "
-                var move = gameController.topSolves[i]
-                if (move && typeof move === 'object') {
-                    solves += move.word + " (" + move.createsPrefixSolutions + ")"
-                } else {
-                    // Fallback if somehow we get a string
-                    solves += move
-                }
-            }
-            return solves
-        }
-        font.pixelSize: 22
-        color: "#6495ed"
-        font.family: "Comic Neue"
-    }
+// Already used animation timer
+Timer {
+    id: alreadyUsedTimer
+    interval: 2000
+    onTriggered: showAlreadyUsedAnimation = false
 }
+
+    // Top solves display (window-level overlay, only visible during gameplay)
+    Rectangle {
+        id: topSolvesOverlay
+        x: mainWindow.width / 2 - 300
+        y: 170
+        width: 600
+        height: 35
+        color: "transparent"
+        radius: 8
+        border.color: "transparent"
+        border.width: 1
+        // Show ONLY if player has submitted at least one word AND there are top solves
+        // This ensures top solves appear AFTER word submission, not before
+        visible: currentScreen === "gameplay" && 
+                 gameController.topSolves.length > 0 && 
+                 gameController.playerWords.length > 0
+        z: 1000
+
+        Text {
+            id: topSolvesOverlayText
+            anchors.centerIn: parent
+            text: {
+                if (gameController.topSolves.length === 0) return ""
+                var solves = ""
+                for (var i = 0; i < Math.min(4, gameController.topSolves.length); i++) {
+                    if (i > 0) solves += ", "
+                    var move = gameController.topSolves[i]
+                    if (move && typeof move === 'object') {
+                        solves += move.word + " (" + move.createsPrefixSolutions + ")"
+                    } else {
+                        // Fallback if somehow we get a string
+                        solves += move
+                    }
+                }
+                return solves
+            }
+            font.pixelSize: 22
+            color: "#6495ed"
+            font.family: "Comic Neue"
+        }
+    }
 
     // File dialog & drop area for loading custom dictionary files
     FileDialog {
@@ -288,16 +565,12 @@ Rectangle {
         }
     }
 
-    // (DropArea moved into main menu to avoid blocking global input)
-
-    // chosen path set if user uploaded (handled in top-level properties)
-
     StackLayout {
         anchors.fill: parent
         currentIndex: {
             switch(currentScreen) {
                 case "mainMenu": return 0;
-                case "uploadMenu": return 1;
+                case "upload": return 1;
                 case "gameplay": return 2;
                 case "gameOver": return 3;
                 default: return 0;
@@ -320,7 +593,7 @@ Rectangle {
                         font.bold: true
                         color: "white"
                         Layout.alignment: Qt.AlignHCenter
-                        font.family: "Arial Black"
+                        font.family: "Comic Neue"
                     }
 
                     Rectangle {
@@ -331,8 +604,8 @@ Rectangle {
 
                         Text {
                             anchors.centerIn: parent
-                            text: "Ready to play?"
-                            font.pixelSize: 28
+                            text: "Do you wish to use the default directory?"
+                            font.pixelSize: 32
                             color: "#f5c542"
                             font.bold: true
                             font.family: "Comic Neue"
@@ -340,22 +613,29 @@ Rectangle {
                     }
 
                     RowLayout {
-                        spacing: 20
+                        spacing: 40
                         Layout.alignment: Qt.AlignHCenter
 
+                        // Yes (use default)
                         Button {
-                            Layout.preferredWidth: 240
+                            Layout.preferredWidth: 360
                             Layout.preferredHeight: 70
                             background: Rectangle {
-                                color: parent.hovered ? "#f0f0f0" : "white"
-                                radius: 12
-                                border.color: "white"
-                                border.width: 3
+                                color: parent.hovered ? "#181818" : "#7f7b7b"
+                                radius: 24
                             }
-                            contentItem: Text { text: "Yes"; font.pixelSize: 22; color: "#2b2d31" }
+                            contentItem: Text {
+                                anchors.fill: parent
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                text: "Yes"
+                                font.pixelSize: 28
+                                color: "white"
+                                font.family: "Comic Neue"
+                            }
                             onClicked: {
-                                var dictPath = "/home/hiyodori/Words/Dictionaries/Last_Letter/last_letter.txt"
-                                var patternPath = "/home/hiyodori/Words/Dictionaries/Last_Letter/rare_prefix.txt"
+                                var dictPath = "./Dictionary/last_letter.txt"
+                                var patternPath = "./Dictionary/rare_prefix.txt"
                                 chosenDictPath = dictPath
                                 if (gameController.loadDatabase(dictPath, patternPath)) {
                                     gameController.startNewGame()
@@ -369,59 +649,117 @@ Rectangle {
                             }
                         }
 
+                        // No (go to upload)
                         Button {
-                            Layout.preferredWidth: 240
+                            Layout.preferredWidth: 360
                             Layout.preferredHeight: 70
                             background: Rectangle {
-                                color: "transparent"
-                                radius: 12
-                                border.color: "#ff6b6b"
-                                border.width: 4
+                                color: parent.hovered ? "#181818" : "#ff6b6b"
+                                radius: 24
                             }
-                            contentItem: Text { text: "No"; font.pixelSize: 22; color: "#ff6b6b" }
-                            onClicked: {
-                                // go to upload screen
-                                currentScreen = "uploadMenu"
+                            contentItem: Text {
+                                anchors.fill: parent
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                text: "No"
+                                font.pixelSize: 28
+                                color: "white"
+                                font.family: "Comic Neue"
                             }
+                            onClicked: currentScreen = "upload"
                         }
                     }
+                }
+            }
+        }
 
-                    Text {
-                        text: chosenDictPath === "" ? "Dictionary: /home/hiyodori/Words/Dictionaries/Last_Letter/" : "Dictionary: " + chosenDictPath
-                        font.pixelSize: 14
-                        color: "#808080"
-                        Layout.alignment: Qt.AlignHCenter
-                        font.family: "Comic Neue"
-                    }
+        // ========== Screen: Upload Dictionary ==========
+        Item {
+            Rectangle {
+                anchors.fill: parent
+                color: "#1f1f23"
 
-                    // Visual drop area (won't block buttons)
-                    Rectangle {
-                        Layout.preferredWidth: 600
-                        Layout.preferredHeight: 100
-                        color: "#3a3940"
-                        radius: 8
-                        Layout.alignment: Qt.AlignHCenter
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 20
 
-                        Text { anchors.centerIn: parent; text: "Drag & drop dictionary here"; color: "#cfcfcf" }
+                    // Primary upload design: large rounded purple box with centered text
+                    Item {
+                        width: parent.width
+                        height: 360
 
-                        DropArea {
-                            anchors.fill: parent
-                            onDropped: {
-                                if (drag.mimeData.hasUrls) {
-                                    var urls = drag.mimeData.urls
-                                    if (urls.length > 0) {
-                                        var f = urls[0].toLocalFile()
-                                        chosenDictPath = f
-                                        var ok = gameController.loadDatabase(f, "")
-                                        if (ok) console.log("Loaded dropped file:", f)
-                                        else console.log("Failed to load dropped file:", f)
+                        Rectangle {
+                            id: uploadBox
+                            width: parent.width * 0.7
+                            height: 120
+                            radius: 20
+                            color: "#4a4d57"
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.topMargin: 0
+
+                            Text {
+                                anchors.fill: parent
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                text: "Upload the dictionary file here..."
+                                font.pixelSize: 32
+                                color: "#e6e6e6"
+                                font.family: "Comic Neue"
+                            }
+
+                            DropArea {
+                                anchors.fill: parent
+                                onDropped: {
+                                    if (drag.mimeData.hasUrls) {
+                                        var urls = drag.mimeData.urls
+                                        if (urls.length > 0) {
+                                            var f = urls[0].toLocalFile()
+                                            chosenDictPath = f
+                                            var ok = gameController.loadDatabase(f, "")
+                                            if (ok) {
+                                                console.log("Loaded dropped file:", f)
+                                                gameController.startNewGame()
+                                                currentScreen = "gameplay"
+                                                localPlayerHearts = gameController.playerHearts
+                                                maxTime = getMaxTimeForDifficulty(gameController.difficulty)
+                                                timeRemaining = maxTime
+                                                timerRunning = true
+                                                Qt.callLater(function() { userInput.forceActiveFocus() })
+                                            } else console.log("Failed to load dropped file:", f)
+                                        }
                                     }
                                 }
                             }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: fileDialog.open()
+                            }
+                        }
+
+                        // Upload icon centered below the box
+                        Image {
+                            source: "qrc:///Assets/upload.png"
+                            width: 56
+                            height: 56
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: uploadBox.bottom
+                            anchors.topMargin: 12
+                        }
+
+                        // Cancel button
+                        Button {
+                            text: "Cancel"
+                            Layout.preferredWidth: 240
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: uploadBox.bottom
+                            anchors.topMargin: 84
+                            onClicked: currentScreen = "mainMenu"
                         }
                     }
-                        // placeholder spacing (upload handled in upload menu)
-                        Rectangle { Layout.preferredWidth: 600; Layout.preferredHeight: 40; color: "transparent" }
                 }
             }
         }
@@ -516,6 +854,16 @@ Rectangle {
                                             clip: true
                                             activeFocusOnPress: true
                                             font.family: "Comic Neue"
+
+                                            // Play typing sound with progressive volume
+                                            onTextChanged: {
+                                              if (text.length > 0) {
+                                                // Volume increases from 0.3 to 1.0 based on text length (max at 10 chars)
+                                                var volumeMultiplier = Math.min(text.length / 10.0, 1.0)
+                                                typeSound.volume = 0.25 + (0.25 * volumeMultiplier)
+                                                typeSound.play()
+                                              }
+                                            }
                                             
                                             Text {
                                                 visible: parent.contentWidth > 300
@@ -534,8 +882,25 @@ Rectangle {
                                                 var fullWord = gameController.currentPrefix + text
                                                 // Allow submitting the prefix itself (when text is empty) as long as there's something to submit
                                                 if (fullWord.length > 0) {
+                                                    // Check if this is a top solve BEFORE submitting
+                                                    var isTopSolve = false
+                                                    for (var i = 0; i < gameController.topSolves.length; i++) {
+                                                        var topSolveWord = gameController.topSolves[i].word
+                                                        if (topSolveWord === fullWord.toLowerCase()) {
+                                                            isTopSolve = true
+                                                            break
+                                                        }
+                                                    }
+                                                    
                                                     var success = gameController.submitWord(fullWord)
                                                     if (success) {
+                                                        // Play appropriate sound immediately
+                                                        if (isTopSolve) {
+                                                            topSolveSound.play()
+                                                        } else {
+                                                            submitSound.play()
+                                                        }
+                                                        
                                                         shouldShowTopSolves = true
                                                         text = ""
                                                         maxTime = getMaxTimeForDifficulty(gameController.difficulty)
@@ -572,8 +937,6 @@ Rectangle {
                         }
                     }
 
-                    
-
                     // Main gameplay area - centered avatars with words below
                     Item {
                         Layout.fillWidth: true
@@ -581,6 +944,7 @@ Rectangle {
 
                         RowLayout {
                             anchors.centerIn: parent
+                            anchors.verticalCenterOffset: -40
                             spacing: 80
 
                             // Player side
@@ -678,7 +1042,7 @@ Rectangle {
                                     Layout.preferredHeight: 150
                                     Layout.alignment: Qt.AlignHCenter
                                     color: "#6b6e76"
-                                    radius: 0
+                                    radius: 24
                                     clip: true
                                     border.width: 2
                                     border.color: "#483d8b"
@@ -732,78 +1096,129 @@ Rectangle {
                             }
 
                             // Star progress display (3x2 grid between player and AI)
-                            Item {
-                                Layout.preferredWidth: 200
-                                Layout.preferredHeight: 150
-                                Layout.alignment: Qt.AlignVCenter
+// Star progress display (3x3 grid between player and AI)
+Item {
+    Layout.preferredWidth: 200
+    Layout.preferredHeight: 200
+    Layout.alignment: Qt.AlignVCenter
 
-                                Column {
-                                    anchors.centerIn: parent
-                                    spacing: 15
+    Column {
+        anchors.centerIn: parent
+        spacing: 10
 
-                                    // Top row - 3 stars
-                                    Row {
-                                        spacing: 15
+        // Top row - 3 stars (indices 0, 1, 2)
+        Row {
+            spacing: 15
+            anchors.horizontalCenter: parent.horizontalCenter
 
-                                        Repeater {
-                                            model: 3
-                                            delegate: Text {
-                                                text: "★"
-                                                font.pixelSize: 48
-                                                color: index < gameController.playerPoints ? "#f5c542" : "#5a5d64"
-                                                
-                                                Behavior on color {
-                                                    ColorAnimation { duration: 300 }
-                                                }
-                                            }
-                                        }
-                                    }
+            Repeater {
+                model: 3
+                delegate: Text {
+                    text: "★"
+                    font.pixelSize: 42
+                    color: index < gameController.playerPoints ? "#f5c542" : "#5a5d64"
+                    
+                    Behavior on color {
+                        ColorAnimation { duration: 300 }
+                    }
+                }
+            }
+        }
 
-                                    // Bottom row - 3 stars
-                                    Row {
-                                        spacing: 15
+        // Middle row - 3 stars (indices 3, 4, 5)
+        Row {
+            spacing: 15
+            anchors.horizontalCenter: parent.horizontalCenter
 
-                                        Repeater {
-                                            model: 3
-                                            delegate: Text {
-                                                text: "★"
-                                                font.pixelSize: 48
-                                                color: (index + 3) < gameController.playerPoints ? "#f5c542" : "#5a5d64"
-                                                
-                                                Behavior on color {
-                                                    ColorAnimation { duration: 300 }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                // Floating "TOP SOLVE!" text
-                                Text {
-                                    id: topSolveFloatText
-                                    text: "TOP SOLVE!"
-                                    font.pixelSize: 28
-                                    font.bold: true
-                                    color: "#00d9ff"
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    y: 200
-                                    visible: showTopSolveNotification
+            Repeater {
+                model: 3
+                delegate: Text {
+                    text: "★"
+                    font.pixelSize: 42
+                    color: (index + 3) < gameController.playerPoints ? "#f5c542" : "#5a5d64"
+                    
+                    Behavior on color {
+                        ColorAnimation { duration: 300 }
+                    }
+                }
+            }
+        }
 
-                                    NumberAnimation on y {
-                                        running: showTopSolveNotification
-                                        from: 200
-                                        to: 140
-                                        duration: 2000
-                                    }
+        // Bottom row - 3 stars (indices 6, 7, 8)
+        Row {
+            spacing: 15
+            anchors.horizontalCenter: parent.horizontalCenter
 
-                                    NumberAnimation on opacity {
-                                        running: showTopSolveNotification
-                                        from: 1.0
-                                        to: 0.0
-                                        duration: 2000
-                                    }
-                                }
-                            }
+            Repeater {
+                model: 3
+                delegate: Text {
+                    text: "★"
+                    font.pixelSize: 42
+                    color: (index + 6) < gameController.playerPoints ? "#f5c542" : "#5a5d64"
+                    
+                    Behavior on color {
+                        ColorAnimation { duration: 300 }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Floating "TOP SOLVE!" text
+    Text {
+        id: topSolveFloatText
+        text: "TOP SOLVE!"
+        font.pixelSize: 28
+        font.bold: true
+        color: "#00d9ff"
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: 230
+        visible: showTopSolveNotification
+
+        NumberAnimation on y {
+            running: showTopSolveNotification
+            from: 230
+            to: 170
+            duration: 2000
+        }
+
+        NumberAnimation on opacity {
+            running: showTopSolveNotification
+            from: 1.0
+            to: 0.0
+            duration: 2000
+        }
+    }
+    
+    // Floating "ALREADY USED!" text
+    Text {
+        id: alreadyUsedFloatText
+        text: "ALREADY USED!"
+        font.pixelSize: 24
+        font.bold: true
+        color: "#ff6b6b"
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: 230
+        visible: showAlreadyUsedAnimation
+        font.family: "Comic Neue"
+
+        NumberAnimation on y {
+            running: showAlreadyUsedAnimation
+            from: 230
+            to: 170
+            duration: 2000
+        }
+
+        NumberAnimation on opacity {
+            running: showAlreadyUsedAnimation
+            from: 1.0
+            to: 0.0
+            duration: 2000
+        }
+    }
+}
+
+
 
                             // AI side
                             ColumnLayout {
@@ -832,7 +1247,7 @@ Rectangle {
                                     Layout.preferredHeight: 150
                                     Layout.alignment: Qt.AlignHCenter
                                     color: "#6b6e76"
-                                    radius: 0
+                                    radius: 24
                                     clip: true
                                     border.width: 2
                                     border.color: "#483d8b"
@@ -889,12 +1304,13 @@ Rectangle {
                         }
                         
                         contentItem: Text {
-                            text: "End Game"
+                            anchors.fill: parent
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            text: "Quit"
                             color: "white"
                             font.pixelSize: 18
                             font.bold: true
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
                         }
 
                         onClicked: {
@@ -935,6 +1351,7 @@ Rectangle {
                             Layout.preferredWidth: 200
                             Layout.preferredHeight: 120
                             onClicked: showWordChainDialog = true
+                            background: Rectangle { color: "transparent" }
                             Column {
                                 anchors.fill: parent
                                 anchors.margins: 8
@@ -949,6 +1366,7 @@ Rectangle {
                             Layout.preferredWidth: 200
                             Layout.preferredHeight: 120
                             onClicked: showWordChoicesDialog = true
+                            background: Rectangle { color: "transparent" }
                             Column {
                                 anchors.fill: parent
                                 anchors.margins: 8
@@ -984,19 +1402,18 @@ Rectangle {
                             Layout.preferredHeight: 70
                             
                             background: Rectangle {
-                                color: parent.hovered ? "#f0f0f0" : "white"
+                                color: parent.hovered ? "#181818": "white"
                                 radius: 12
-                                border.color: "white"
-                                border.width: 3
                             }
 
                             contentItem: Text {
+                                anchors.fill: parent
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
                                 text: "Yes"
                                 font.pixelSize: 32
                                 font.bold: true
                                 color: "#2b2d31"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
                                 font.family: "Comic Neue"
                             }
 
@@ -1018,19 +1435,18 @@ Rectangle {
                             Layout.preferredHeight: 70
                             
                             background: Rectangle {
-                                color: "transparent"
+                                color: parent.hovered ? "#181818" : "#ff6b6b"
                                 radius: 12
-                                border.color: "#ff6b6b"
-                                border.width: 4
                             }
 
                             contentItem: Text {
+                                anchors.fill: parent
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
                                 text: "No"
                                 font.pixelSize: 32
                                 font.bold: true
-                                color: "#ff6b6b"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
+                                color: "white"
                                 font.family: "Comic Neue"
                             }
 

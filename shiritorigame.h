@@ -11,8 +11,8 @@
 // Constants
 const int MAX_PREFIX_LEN = 4;
 const int STARTING_HEARTS = 2;
-const int TOP_MOVES_TO_SHOW = 4;
-const int POINTS_FOR_HEART = 6;
+const int TOP_MOVES_TO_SHOW = 5;
+const int POINTS_FOR_HEART = 9;
 const int OBSCURE_THRESHOLD = 15;
 
 // Blacklisted suffixes (common/trivial) - matches shiritori.cpp
@@ -67,6 +67,9 @@ private:
     
     bool has_unused_words(const std::string& prefix) const;
     std::string find_valid_prefix(const std::string& word, int max_difficulty) const;
+    bool word_ends_with_blacklisted_suffix(const std::string& word) const;
+    bool is_prefix_blacklisted(const std::string& prefix) const;
+    bool is_prefix_self_solving(const std::string& prefix) const;
 
 public:
     ShiritoriGame();
@@ -93,13 +96,6 @@ public:
     int getPlayerPoints() const { return player_points; }
     const std::vector<std::string>& getWordChain() const { return word_chain; }
     void losePlayerHeart();
-
-private:
-    bool word_ends_with_blacklisted_suffix(const std::string& word) const;
-    bool is_prefix_blacklisted(const std::string& prefix) const;
-    bool is_prefix_self_solving(const std::string& prefix) const;
-    
-    // private helpers
 };
 
 #endif // SHIRITORIGAME_H

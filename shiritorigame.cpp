@@ -57,6 +57,11 @@ inline int get_difficulty_level(int turns_since_reset) {
 inline double calculateObscurityScoreLocal(const std::string& prefix, int solution_count,
                                 const std::vector<std::string>& solutions) {
     double score = (prefix.length() - 2) * 10.0;
+    
+    if (solution_count > 0) {
+        score += (100.0 / solution_count);
+    }
+    
     static const std::string rare_letters = "jqxzvkw";
     for (char c : prefix) {
         if (rare_letters.find(c) != std::string::npos) score += 15.0;
@@ -83,7 +88,7 @@ inline double calculateObscurityScoreLocal(const std::string& prefix, int soluti
     return score;
 }
 
-// Find best creates-prefix for a word (tries lengths from MAX_PREFIX_LEN..1)
+// Find best creates-prefix for a word
 std::pair<std::string,int> find_best_prefix_static_cached_local(const std::string& word,
                                                                 const std::unordered_map<std::string,int>& prefix_count_cache,
                                                                 const std::unordered_set<std::string>& blacklist,
@@ -93,9 +98,8 @@ std::pair<std::string,int> find_best_prefix_static_cached_local(const std::strin
 
     for (int len = std::min(MAX_PREFIX_LEN, (int)word.length()); len >= 1; --len) {
         std::string prefix = get_suffix(word, len);
-        // skip blacklisted
         if (blacklist.count(prefix) > 0) continue;
-        // skip self-solving: check if any dict word starting with prefix also ends with prefix
+        
         bool self_solving = false;
         auto it = std::lower_bound(dict_list.begin(), dict_list.end(), prefix);
         while (it != dict_list.end() && it->rfind(prefix,0) == 0) {
@@ -127,6 +131,39 @@ std::pair<std::string,int> find_best_prefix_static_cached_local(const std::strin
     return {best_prefix, best_count};
 }
 
+// Add these implementations after the helper functions and before load_database
+
+bool ShiritoriGame::word_ends_with_blacklisted_suffix(const std::string& word) const {
+    for (const auto& suffix : BLACKLIST_SUFFIXES) {
+        if (word.length() >= suffix.length()) {
+            if (word.compare(word.length() - suffix.length(), suffix.length(), suffix) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool ShiritoriGame::is_prefix_blacklisted(const std::string& prefix) const {
+    return BLACKLIST_SUFFIXES.count(prefix) > 0;
+}
+
+bool ShiritoriGame::is_prefix_self_solving(const std::string& prefix) const {
+    // A prefix is self-solving if there exists a word that starts with the prefix
+    // and also ends with the prefix (creating a loop)
+    auto it = std::lower_bound(dict.begin(), dict.end(), prefix);
+    while (it != dict.end() && it->rfind(prefix, 0) == 0) {
+        if (it->length() >= prefix.length()) {
+            std::string suffix = get_suffix(*it, prefix.length());
+            if (suffix == prefix) {
+                return true;
+            }
+        }
+        ++it;
+    }
+    return false;
+}
+
 // Load database
 bool ShiritoriGame::load_database(const std::string& dict_file, const std::string& patterns_file) {
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -153,7 +190,6 @@ bool ShiritoriGame::load_database(const std::string& dict_file, const std::strin
     std::sort(dict.begin(), dict.end());
     std::sort(rev_dict.begin(), rev_dict.end());
     
-    // Build prefix count cache
     std::cout << "[Building prefix count cache...]\n" << std::flush;
     prefix_count_cache.reserve(100000);
     for (const auto& word : dict) {
@@ -184,7 +220,7 @@ bool ShiritoriGame::load_database(const std::string& dict_file, const std::strin
     std::cout << "✓ Pre-calculated " << precalc_count << " word prefixes\n" << std::flush;
     
     std::cout << "[Building obscure suffix database...]\n" << std::flush;
-    int obscure_count = dict.size() * 3; // Approximate
+    int obscure_count = dict.size() * 3;
     int unique_prefixes = patterns.size();
     std::cout << "✓ Found " << obscure_count << " words with obscure suffixes\n";
     std::cout << "  (" << unique_prefixes << " unique obscure prefixes)\n" << std::flush;
@@ -198,7 +234,6 @@ bool ShiritoriGame::load_database(const std::string& dict_file, const std::strin
     return true;
 }
 
-// Reset game
 void ShiritoriGame::reset_game() {
     used_words.clear();
     word_chain.clear();
@@ -213,21 +248,18 @@ void ShiritoriGame::reset_game() {
     last_top_moves.clear();
 }
 
-// Check if word is valid
 bool ShiritoriGame::is_valid_word(const std::string& word) {
     std::string lower = word;
     to_lower_inplace(lower);
     return std::binary_search(dict.begin(), dict.end(), lower);
 }
 
-// Check if word is used
 bool ShiritoriGame::is_used(const std::string& word) {
     std::string lower = word;
     to_lower_inplace(lower);
     return used_words.count(lower) > 0;
 }
 
-// Get random start word
 std::string ShiritoriGame::getRandomStartWord() {
     if (dict.empty()) return "";
     
@@ -242,17 +274,14 @@ std::string ShiritoriGame::getRandomStartWord() {
     return word;
 }
 
-// Get current prefix
 std::string ShiritoriGame::getCurrentPrefix() const {
     return current_prefix;
 }
 
-// Get current difficulty
 int ShiritoriGame::getCurrentDifficulty() const {
     return get_difficulty_level(turns_since_heart_loss);
 }
 
-// Has unused words
 bool ShiritoriGame::has_unused_words(const std::string& prefix) const {
     if (exhausted_prefixes.count(prefix) > 0) return false;
     
@@ -267,7 +296,6 @@ bool ShiritoriGame::has_unused_words(const std::string& prefix) const {
     return false;
 }
 
-// Find valid prefix
 std::string ShiritoriGame::find_valid_prefix(const std::string& word, int max_difficulty) const {
     for (int len = max_difficulty; len >= 1; --len) {
         std::string prefix = get_suffix(word, len);
@@ -276,91 +304,35 @@ std::string ShiritoriGame::find_valid_prefix(const std::string& word, int max_di
     return "";
 }
 
-// Get top moves
-std::vector<std::string> ShiritoriGame::getTopMoves(const std::string& prefix) const {
-    std::vector<std::string> moves;
-    
-    auto it = std::lower_bound(dict.begin(), dict.end(), prefix);
-    int count = 0;
-    
-    while (it != dict.end() && it->rfind(prefix, 0) == 0 && count < TOP_MOVES_TO_SHOW) {
-        if (used_words.count(*it) == 0) {
-            moves.push_back(*it);
-            ++count;
-        }
-        ++it;
-    }
-    
-    return moves;
-}
-
-// Count solutions (suffix matches) for a given prefix
-int ShiritoriGame::countSolutions(const std::string& prefix) const {
-    int count = 0;
-    auto it = std::lower_bound(dict.begin(), dict.end(), prefix);
-    
-    while (it != dict.end() && it->rfind(prefix, 0) == 0) {
-        count++;
-        ++it;
-    }
-    
-    return count;
-}
-
-// Check if word ends with blacklisted suffix
-bool ShiritoriGame::word_ends_with_blacklisted_suffix(const std::string& word) const {
-    for (const auto& blacklisted : BLACKLIST_SUFFIXES) {
-        if (word.length() >= blacklisted.length()) {
-            std::string word_suffix = word.length() >= blacklisted.length() ? 
-                                     word.substr(word.length() - blacklisted.length()) : "";
-            if (word_suffix == blacklisted) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-// Check if prefix is blacklisted
-bool ShiritoriGame::is_prefix_blacklisted(const std::string& prefix) const {
-    return BLACKLIST_SUFFIXES.count(prefix) > 0;
-}
-
-// Check if prefix is self-solving
-bool ShiritoriGame::is_prefix_self_solving(const std::string& prefix) const {
-    auto it = std::lower_bound(dict.begin(), dict.end(), prefix);
-    while (it != dict.end() && it->rfind(prefix, 0) == 0) {
-        if (it->length() >= prefix.length()) {
-            std::string suffix = it->substr(it->length() - prefix.length());
-            if (suffix == prefix) {
-                return true;
-            }
-        }
-        ++it;
-    }
-    return false;
-}
-
-// Get top AI moves - using shiritori.cpp's filtering algorithm
+// NEW ALGORITHM: Collect ALL candidates, rank by priority, return top N
 std::vector<WordRank> ShiritoriGame::getTopAIMoves(const std::string& required_prefix, int top_n) {
     std::vector<WordRank> candidates;
-    candidates.reserve(200);
-
+    candidates.reserve(500);  // Reduced from 1000
+    
     auto it = std::lower_bound(dict.begin(), dict.end(), required_prefix);
-
-    while (it != dict.end() && it->rfind(required_prefix, 0) == 0) {
+    
+    int count = 0;
+    const int MAX_CANDIDATES = 200;  // Early exit to prevent processing too many words
+    
+    // STEP 1: Collect candidates with early exit
+    while (it != dict.end() && it->rfind(required_prefix, 0) == 0 && count < MAX_CANDIDATES) {
         if (used_words.count(*it) == 0) {
             WordRank wr;
             wr.word = *it;
 
-            // Determine best creates-prefix and its solution count
+            // Find best creates-prefix
             auto prefix_info = find_best_prefix_static_cached_local(wr.word, prefix_count_cache, BLACKLIST_SUFFIXES, dict);
             wr.creates_prefix = prefix_info.first;
-            wr.creates_prefix_solutions = prefix_info.second;
             wr.is_blacklisted = is_prefix_blacklisted(wr.creates_prefix);
             wr.is_self_solving = is_prefix_self_solving(wr.creates_prefix);
+            
+            // Early filtering - skip obviously bad candidates
+            if (wr.is_blacklisted || wr.is_self_solving || word_ends_with_blacklisted_suffix(wr.word)) {
+                ++it;
+                continue;
+            }
 
-            // Obscurity detection: count short obscure suffixes
+            // Check if word itself is obscure
             wr.is_obscure_word = false;
             wr.obscure_suffix_length = 0;
             for (int len = MAX_PREFIX_LEN; len >= 2; --len) {
@@ -373,61 +345,58 @@ std::vector<WordRank> ShiritoriGame::getTopAIMoves(const std::string& required_p
                 }
             }
 
-            // Calculate obscurity score (approx)
-            std::vector<std::string> dummy_sols; // we don't have exact solutions list here
-            wr.obscurity_score = calculateObscurityScoreLocal(wr.creates_prefix, wr.creates_prefix_solutions, dummy_sols);
-
-            // Difficulty level approximated by prefix length
+            // Count UNUSED solutions more efficiently
+            int solution_count = 0;
+            auto sol_it = std::lower_bound(dict.begin(), dict.end(), wr.creates_prefix);
+            while (sol_it != dict.end() && sol_it->rfind(wr.creates_prefix, 0) == 0) {
+                if (used_words.count(*sol_it) == 0) {
+                    solution_count++;
+                }
+                ++sol_it;
+            }
+            
+            // Skip if no solutions or already solved
+            if (solution_count == 0 || solved_suffixes.count(wr.creates_prefix) > 0) {
+                ++it;
+                continue;
+            }
+            
+            wr.creates_prefix_solutions = solution_count;
+            
+            // Simplified scoring for performance
+            double total = 0.0;
+            total += 10000.0 / solution_count;  // Primary: fewest solutions
+            total += wr.creates_prefix.length() * 50.0;  // Bonus for longer prefix
+            
+            if (wr.is_obscure_word) {
+                total += 1000.0 + wr.obscure_suffix_length * 100.0;
+            }
+            
+            wr.total_score = total;
             wr.difficulty_level = (int)wr.creates_prefix.length();
 
-            // compute total score similar to shiritori.cpp's calculate_word_score
-            double total = 0.0;
-            if (wr.is_blacklisted || wr.is_self_solving) {
-                total = -1000.0;
-            } else if (wr.creates_prefix_solutions == 0) {
-                total = -2000.0;
-            } else {
-                total += 1000.0 / wr.creates_prefix_solutions;
-                if (wr.is_obscure_word) {
-                    total += 500.0 + wr.obscure_suffix_length * 50.0;
-                }
-                total += wr.creates_prefix.length() * 20.0;
-                total += wr.obscurity_score * 2.0;
-                total += wr.word.length() * 1.0;
-            }
-            wr.total_score = total;
-
-            // push candidate
             candidates.push_back(wr);
+            count++;
         }
         ++it;
     }
 
-    // Filter out unwanted candidates
-    candidates.erase(
-        std::remove_if(candidates.begin(), candidates.end(),
-            [this](const WordRank& wr) {
-                return wr.is_blacklisted || wr.is_self_solving ||
-                       word_ends_with_blacklisted_suffix(wr.word) ||
-                       wr.creates_prefix_solutions == 0 ||
-                       solved_suffixes.count(wr.creates_prefix) > 0;
-            }),
-        candidates.end()
-    );
-
     if (candidates.empty()) return {};
 
-    // Sort by total score descending (rarest + obscurity prioritized), then word
+    // STEP 2: Sort by total score (highest first)
     std::sort(candidates.begin(), candidates.end(), [](const WordRank& a, const WordRank& b) {
         if (std::abs(a.total_score - b.total_score) > 0.001) return a.total_score > b.total_score;
         return a.word < b.word;
     });
 
-    if (candidates.size() > static_cast<size_t>(top_n)) candidates.resize(top_n);
+    // STEP 3: Return top N candidates
+    if (candidates.size() > static_cast<size_t>(top_n)) {
+        candidates.resize(top_n);
+    }
+    
     return candidates;
 }
 
-// Process player word
 void ShiritoriGame::processPlayerWord(const std::string& word) {
     std::string lower = word;
     to_lower_inplace(lower);
@@ -439,7 +408,6 @@ void ShiritoriGame::processPlayerWord(const std::string& word) {
     
     solved_suffixes.insert(current_prefix);
     
-    // Check if it was a top solve
     if (std::find(last_top_moves.begin(), last_top_moves.end(), lower) != last_top_moves.end()) {
         ++player_points;
         if (player_points >= POINTS_FOR_HEART) {
@@ -451,24 +419,20 @@ void ShiritoriGame::processPlayerWord(const std::string& word) {
 
 void ShiritoriGame::losePlayerHeart() {
     if (player_hearts > 0) player_hearts -= 1;
-    // reset points and difficulty timer when a heart is lost
     player_points = 0;
     turns_since_heart_loss = 0;
 }
 
-// Was top solve
 bool ShiritoriGame::wasTopSolve(const std::string& word) const {
     std::string lower = word;
     to_lower_inplace(const_cast<std::string&>(lower));
     return std::find(last_top_moves.begin(), last_top_moves.end(), lower) != last_top_moves.end();
 }
 
-// Get a new prefix for a given word and difficulty level (public wrapper)
 std::string ShiritoriGame::getNewPrefix(const std::string& word, int difficulty) const {
     return find_valid_prefix(word, difficulty);
 }
 
-// Get AI move
 std::string ShiritoriGame::getAIMove() {
     if (word_chain.empty()) return "";
     
@@ -478,7 +442,6 @@ std::string ShiritoriGame::getAIMove() {
     std::string prefix = find_valid_prefix(last_word, difficulty);
     
     if (prefix.empty()) {
-        // Pick a random word to continue
         if (dict.empty()) return "";
         
         std::uniform_int_distribution<> dis(0, std::min(1000, static_cast<int>(dict.size()) - 1));
@@ -490,21 +453,25 @@ std::string ShiritoriGame::getAIMove() {
             if (attempts > 100) break;
         } while (used_words.count(word) > 0);
         
-        if (used_words.count(word) > 0) return ""; // Couldn't find unused word
+        if (used_words.count(word) > 0) return "";
         
         word_chain.push_back(word);
         used_words.insert(word);
         ++turn_count;
         ++turns_since_heart_loss;
         
-        // Update prefix for player
         current_prefix = find_valid_prefix(word, get_difficulty_level(turns_since_heart_loss));
-        last_top_moves = getTopMoves(current_prefix);
+        
+        // Get ALL top moves, return top 5
+        auto top_moves_ranked = getTopAIMoves(current_prefix, 5);
+        last_top_moves.clear();
+        for (const auto& move : top_moves_ranked) {
+            last_top_moves.push_back(move.word);
+        }
         
         return word;
     }
     
-    // Find best AI move with given prefix
     auto it = std::lower_bound(dict.begin(), dict.end(), prefix);
     std::vector<std::string> candidates;
     
@@ -517,19 +484,22 @@ std::string ShiritoriGame::getAIMove() {
     
     if (candidates.empty()) return "";
     
-    // Pick first candidate (could be improved with ranking logic from original)
     std::string ai_word = candidates[0];
     word_chain.push_back(ai_word);
     used_words.insert(ai_word);
     ++turn_count;
     ++turns_since_heart_loss;
     
-    // Mark the prefix as solved
     solved_suffixes.insert(prefix);
     
-    // Update prefix for player's next turn
     current_prefix = find_valid_prefix(ai_word, get_difficulty_level(turns_since_heart_loss));
-    last_top_moves = getTopMoves(current_prefix);
+    
+    // Get ALL top moves for checking, return top 5
+    auto top_moves_ranked = getTopAIMoves(current_prefix, 5);
+    last_top_moves.clear();
+    for (const auto& move : top_moves_ranked) {
+        last_top_moves.push_back(move.word);
+    }
     
     return ai_word;
 }

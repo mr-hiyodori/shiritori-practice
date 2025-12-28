@@ -9,6 +9,7 @@ GameController::GameController(QObject *parent)
     m_game = new ShiritoriGame();
     m_gameStatus = "Ready to load database";
     m_topSolvesHistory.clear();
+    m_playerWordHistory.clear();
 }
 
 GameController::~GameController()
@@ -49,6 +50,7 @@ void GameController::startNewGame()
     m_currentPrefix.clear();
     m_topSolves.clear();
     m_topSolvesHistory.clear();
+    m_playerWordHistory.clear();
     
     emit playerHeartsChanged();
     emit playerPointsChanged();
@@ -100,15 +102,27 @@ bool GameController::submitWord(const QString& word)
         return false;
     }
     
-    // Check if it was a top solve BEFORE processing
+    // Check if it's a top solve BEFORE processing
     bool wasTopSolve = m_game->wasTopSolve(wordStr);
+    
+    qDebug() << "Before processing - Top solves count:" << m_topSolves.size();
+    
+    // Save the current top solves BEFORE processing
+    // This is what the player was facing when they made their choice
+    QVariantList currentTopSolves = m_topSolves;
     
     // Word is valid, process it
     m_game->processPlayerWord(wordStr);
     m_playerWords.append(word.toLower());
+    m_playerWordHistory.push_back(wordStr);
     emit playerWordsChanged();
     
     qDebug() << "Word accepted, was top solve:" << wasTopSolve;
+    qDebug() << "Saving to history - Player word:" << word.toLower() 
+             << "Top solves count:" << currentTopSolves.size();
+    
+    // Save the snapshot: player word + the top solves they faced
+    m_topSolvesHistory.append(currentTopSolves);
     
     // Notify if it was a top solve
     if (wasTopSolve) {
@@ -118,11 +132,10 @@ bool GameController::submitWord(const QString& word)
     emit playerHeartsChanged();
     emit playerPointsChanged();
     
-    // Top solves were calculated before player input (in processAITurn via delay)
-    // Now display them after successful submission
+    // Display top solves after successful submission
     emit topSolvesChanged();
     
-    // Process AI turn
+    // Process AI turn (this will calculate NEW top solves for the next round)
     processAITurn();
     
     return true;
@@ -164,6 +177,7 @@ void GameController::processAITurn()
     m_difficulty = m_game->getCurrentDifficulty();
     emit difficultyChanged();
     
+    // Calculate top solves for the new prefix
     updateTopSolves();
 }
 
@@ -171,7 +185,7 @@ void GameController::updateTopSolves()
 {
     if (!m_game) return;
     
-    // Get top moves using shiritori.cpp's algorithm with proper filtering
+    // Get top moves
     auto topMoves = m_game->getTopAIMoves(m_currentPrefix.toStdString(), TOP_MOVES_TO_SHOW);
     
     m_topSolves.clear();
@@ -184,10 +198,8 @@ void GameController::updateTopSolves()
     
     qDebug() << "Top solves calculated:" << m_topSolves.size() << "words for prefix" << m_currentPrefix;
     
-    // NOTE: Do NOT emit topSolvesChanged() here
-    // Only submitWord() should emit it to display top solves AFTER player submits
-    // Save a snapshot of the top solves for history (used by Word Choices screen)
-    m_topSolvesHistory.append(m_topSolves);
+    // NOTE: Do NOT save to history here
+    // History is saved in submitWord() when player makes their choice
 }
 
 QStringList GameController::getFullWordChain()
@@ -201,13 +213,29 @@ QStringList GameController::getFullWordChain()
 
 int GameController::topSolvesHistorySize() const
 {
+    qDebug() << "topSolvesHistorySize called, size:" << m_topSolvesHistory.size();
     return m_topSolvesHistory.size();
 }
 
 QVariantList GameController::topSolvesForIndex(int idx) const
 {
-    if (idx < 0 || idx >= m_topSolvesHistory.size()) return QVariantList();
+    if (idx < 0 || idx >= m_topSolvesHistory.size()) {
+        qDebug() << "topSolvesForIndex called with invalid idx:" << idx;
+        return QVariantList();
+    }
+    qDebug() << "topSolvesForIndex" << idx << "returning" << m_topSolvesHistory.at(idx).size() << "items";
     return m_topSolvesHistory.at(idx);
+}
+
+QString GameController::playerWordAtIndex(int index) const
+{
+    if (index >= 0 && index < static_cast<int>(m_playerWordHistory.size())) {
+        QString word = QString::fromStdString(m_playerWordHistory[index]);
+        qDebug() << "playerWordAtIndex" << index << "returning:" << word;
+        return word;
+    }
+    qDebug() << "playerWordAtIndex called with invalid index:" << index;
+    return "";
 }
 
 void GameController::resetGame()
@@ -221,6 +249,8 @@ void GameController::resetGame()
     m_aiWords.clear();
     m_currentPrefix.clear();
     m_topSolves.clear();
+    m_topSolvesHistory.clear();
+    m_playerWordHistory.clear();
     
     emit playerHeartsChanged();
     emit playerPointsChanged();
@@ -238,19 +268,11 @@ void GameController::endGame()
     qDebug() << "Game ended by player";
     emit gameOver(false); // Player surrendered, AI wins
 }
+
 void GameController::onHeartLoss()
 {
     if (!m_game) return;
     
-    qDebug() << "Heart lost - generating new prefix and resetting difficulty";
-    
-    // Get the last AI word (the current game word chain tail)
-    const auto& wordChain = m_game->getWordChain();
-    if (wordChain.empty()) return;
-    
-    const std::string& lastWord = wordChain.back();
-    
-    // Get a new prefix with reset difficulty (difficulty resets to 1 when heart is lost)
     qDebug() << "Heart lost - updating backend, generating new prefix and resetting difficulty";
 
     // Decrement player heart in backend and reset points/difficulty counters
@@ -264,6 +286,12 @@ void GameController::onHeartLoss()
         return;
     }
 
+    // Get the last word from chain
+    const auto& wordChain = m_game->getWordChain();
+    if (wordChain.empty()) return;
+    
+    const std::string& lastWord = wordChain.back();
+    
     // Get a new prefix with reset difficulty (difficulty resets to 1 when heart is lost)
     std::string newPrefix = m_game->getNewPrefix(lastWord, 1);
     
