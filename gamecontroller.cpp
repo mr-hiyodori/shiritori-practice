@@ -49,6 +49,7 @@ void GameController::startNewGame()
     m_aiWords.clear();
     m_currentPrefix.clear();
     m_topSolves.clear();
+    m_regularSolves.clear();
     m_topSolvesHistory.clear();
     m_playerWordHistory.clear();
     
@@ -58,6 +59,7 @@ void GameController::startNewGame()
     emit aiWordsChanged();
     emit currentPrefixChanged();
     emit topSolvesChanged();
+    emit regularSolvesChanged();
     
     // AI makes first move
     std::string firstWord = m_game->getRandomStartWord();
@@ -198,8 +200,22 @@ void GameController::updateTopSolves()
     
     qDebug() << "Top solves calculated:" << m_topSolves.size() << "words for prefix" << m_currentPrefix;
     
-    // NOTE: Do NOT save to history here
-    // History is saved in submitWord() when player makes their choice
+    // Get regular solves
+    auto regularMoves = m_game->getRegularSolves(m_currentPrefix.toStdString(), 5);
+    
+    m_regularSolves.clear();
+    for (const auto& move : regularMoves) {
+        QVariantMap moveMap;
+        moveMap["word"] = QString::fromStdString(move.word);
+        moveMap["createsPrefixSolutions"] = move.creates_prefix_solutions;
+        m_regularSolves.append(moveMap);
+    }
+    
+    qDebug() << "Regular solves calculated:" << m_regularSolves.size() << "words for prefix" << m_currentPrefix;
+    
+    // Emit signals to notify QML
+    emit topSolvesChanged();
+    emit regularSolvesChanged();
 }
 
 QStringList GameController::getFullWordChain()
@@ -249,6 +265,7 @@ void GameController::resetGame()
     m_aiWords.clear();
     m_currentPrefix.clear();
     m_topSolves.clear();
+    m_regularSolves.clear();
     m_topSolvesHistory.clear();
     m_playerWordHistory.clear();
     
@@ -258,6 +275,7 @@ void GameController::resetGame()
     emit aiWordsChanged();
     emit currentPrefixChanged();
     emit topSolvesChanged();
+    emit regularSolvesChanged();
     
     m_gameStatus = "Game reset";
     emit gameStatusChanged();

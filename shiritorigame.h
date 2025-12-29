@@ -20,7 +20,7 @@ const std::unordered_set<std::string> BLACKLIST_SUFFIXES = {
     "ness", "ally", "ses", "sis", "lity", "ties", "hies", 
     "phyll", "sts", "ossy", "uses", "oses", "tics", 
     "nist", "isms", "ity", "ions", "mian", "ies", "ers", "ing",
-    "bias", "ias", "ous", "ful", "less", "able", "ible"
+    "bias", "ias", "ous", "ful", "less", "able", "ible", "nize", "tive", "onyx", "tion"
 };
 
 struct WordRank {
@@ -84,6 +84,7 @@ public:
     int getCurrentDifficulty() const;
     std::vector<std::string> getTopMoves(const std::string& prefix) const;
     std::vector<WordRank> getTopAIMoves(const std::string& prefix, int top_n = TOP_MOVES_TO_SHOW);
+    std::vector<WordRank> getRegularSolves(const std::string& prefix, int max_n = 5);
     std::string getRandomStartWord();
     void processPlayerWord(const std::string& word);
     std::string getAIMove();

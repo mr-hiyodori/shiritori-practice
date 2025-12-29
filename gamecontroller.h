@@ -18,6 +18,7 @@ class GameController : public QObject
     Q_PROPERTY(int playerPoints READ playerPoints NOTIFY playerPointsChanged)
     Q_PROPERTY(QString currentPrefix READ currentPrefix NOTIFY currentPrefixChanged)
     Q_PROPERTY(QVariantList topSolves READ topSolves NOTIFY topSolvesChanged)
+    Q_PROPERTY(QVariantList regularSolves READ regularSolves NOTIFY regularSolvesChanged)
     Q_PROPERTY(QStringList playerWords READ playerWords NOTIFY playerWordsChanged)
     Q_PROPERTY(QStringList aiWords READ aiWords NOTIFY aiWordsChanged)
     Q_PROPERTY(QString gameStatus READ gameStatus NOTIFY gameStatusChanged)
@@ -32,6 +33,7 @@ public:
     int playerPoints() const { return m_game ? m_game->getPlayerPoints() : 0; }
     QString currentPrefix() const { return m_currentPrefix; }
     QVariantList topSolves() const { return m_topSolves; }
+    QVariantList regularSolves() const { return m_regularSolves; }
     QStringList playerWords() const { return m_playerWords; }
     QStringList aiWords() const { return m_aiWords; }
     QString gameStatus() const { return m_gameStatus; }
@@ -55,6 +57,7 @@ signals:
     void playerPointsChanged();
     void currentPrefixChanged();
     void topSolvesChanged();
+    void regularSolvesChanged();
     void playerWordsChanged();
     void aiWordsChanged();
     void gameStatusChanged();
@@ -67,6 +70,7 @@ private:
     ShiritoriGame* m_game;
     QString m_currentPrefix;
     QVariantList m_topSolves;
+    QVariantList m_regularSolves;
     QList<QVariantList> m_topSolvesHistory;
     std::vector<std::string> m_playerWordHistory;
     QStringList m_playerWords;
